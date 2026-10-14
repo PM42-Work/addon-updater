@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
-  // 1. Verify Secret Auth Header
   const authHeader = request.headers.get('X-Addon-Auth');
   const expectedSecret = process.env.ADDON_SECRET_HASH;
 
@@ -9,11 +8,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
-  // 2. Fetch Release Data from Private GitHub Repo
   const githubToken = process.env.GITHUB_PAT;
   const repoOwner = process.env.GITHUB_OWNER;
   const repoName = process.env.GITHUB_REPO;
-
   const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 
   try {
@@ -23,26 +20,24 @@ export async function GET(request: Request) {
         'User-Agent': 'Vercel-Addon-Updater',
         'Accept': 'application/vnd.github+json',
       },
-      next: { revalidate: 60 } // Cache results for 60 seconds
+      next: { revalidate: 60 }
     });
 
-    if (!ghResponse.ok) {
-      return NextResponse.json({ error: 'Failed to fetch release' }, { status: ghResponse.status });
-    }
+    if (!ghResponse.ok) return NextResponse.json({ error: 'Failed to fetch release' }, { status: ghResponse.status });
 
     const data = await ghResponse.json();
-    const tagName = data.tag_name;
-
-    // Find the zip asset
     const asset = data.assets?.find((a: any) => a.name === 'AdvancedLighting.zip');
-    if (!asset) {
-      return NextResponse.json({ error: 'Release asset AdvancedLighting.zip not found' }, { status: 444 });
-    }
+    
+    if (!asset) return NextResponse.json({ error: 'Zip not found' }, { status: 444 });
 
-    // Return version tag and asset download URL to Blender
+    // Construct the Vercel Proxy URL using the asset's API URL
+    const host = request.headers.get('host');
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const proxyUrl = `${protocol}://${host}/api/download?assetUrl=${encodeURIComponent(asset.url)}`;
+
     return NextResponse.json({
-      tag_name: tagName,
-      download_url: asset.browser_download_url
+      tag_name: data.tag_name,
+      download_url: proxyUrl
     });
 
   } catch (err: any) {
