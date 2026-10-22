@@ -2,16 +2,28 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('X-Addon-Auth');
-  const expectedSecret = process.env.ADDON_SECRET_HASH;
+  
+  // Define our two allowed addons and their specific details
+  const addons = {
+    [process.env.ADDON_SECRET_HASH as string]: {
+      repo: process.env.GITHUB_REPO, // Your Advanced Lighting repo name
+      assetName: 'AdvancedLighting.zip'
+    },
+    [process.env.BETTERCOLOUR_SECRET_HASH as string]: {
+      repo: process.env.BETTERCOLOUR_GITHUB_REPO, // e.g. "BetterColour"
+      assetName: 'BetterColour.zip'
+    }
+  };
 
-  if (!expectedSecret || authHeader !== expectedSecret) {
+  const activeAddon = addons[authHeader as string];
+
+  if (!activeAddon || !authHeader) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 
   const githubToken = process.env.GITHUB_PAT;
-  const repoOwner = process.env.GITHUB_OWNER;
-  const repoName = process.env.GITHUB_REPO;
-  const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
+  const repoOwner = process.env.GITHUB_OWNER; 
+  const apiUrl = `https://api.github.com/repos/${repoOwner}/${activeAddon.repo}/releases/latest`;
 
   try {
     const ghResponse = await fetch(apiUrl, {
@@ -26,14 +38,14 @@ export async function GET(request: Request) {
     if (!ghResponse.ok) return NextResponse.json({ error: 'Failed to fetch release' }, { status: ghResponse.status });
 
     const data = await ghResponse.json();
-    const asset = data.assets?.find((a: any) => a.name === 'AdvancedLighting.zip');
+    const asset = data.assets?.find((a: any) => a.name === activeAddon.assetName);
     
     if (!asset) return NextResponse.json({ error: 'Zip not found' }, { status: 444 });
 
-    // Construct the Vercel Proxy URL using the asset's API URL
+    // Construct the Vercel Proxy URL, passing both the asset URL AND the required filename
     const host = request.headers.get('host');
     const protocol = host?.includes('localhost') ? 'http' : 'https';
-    const proxyUrl = `${protocol}://${host}/api/download?assetUrl=${encodeURIComponent(asset.url)}`;
+    const proxyUrl = `${protocol}://${host}/api/download?assetUrl=${encodeURIComponent(asset.url)}&filename=${activeAddon.assetName}`;
 
     return NextResponse.json({
       tag_name: data.tag_name,
